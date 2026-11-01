@@ -267,7 +267,7 @@ fn base_config(spec: &Spec, profile: Profile, disk: PathBuf, disk_format: ImageF
         gpu: spec.gpu.clone(),
         audio: Audio {
             enabled: spec.audio,
-            backend: None,
+            ..Audio::default()
         },
         network: Network {
             enabled: spec.network,

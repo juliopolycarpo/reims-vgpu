@@ -1228,6 +1228,17 @@ guest's `wav` capture starts with 2.5 s of it. `AppleUSBAudio`, which
 macOS does ship, drives a USB audio device on the xHCI controller above
 (`-device usb-audio,audiodev=snd0,bus=xhci.0`), output only.
 
+A VM's settings can ask PipeWire for a longer output queue than QEMU's
+default 46.44 ms, in microseconds, which reims-ctl passes as the audiodev's
+`out.latency`. It trades playback delay for headroom against pauses in the
+guest's delivery, and applies where the backend is `pipewire`, the host's
+choice or the VM's own; other backends keep their options:
+
+```toml
+[audio]
+pipewire_output_latency_us = 100000
+```
+
 reims-ctl's default backend is `pa` where QEMU was built without PipeWire:
 QEMU's meson takes libpipewire-0.3 0.3.60 or later, and the installer
 leaves the feature to configure, so Ubuntu 22.04 (0.3.48) and Debian 11

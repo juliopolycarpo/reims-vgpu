@@ -378,7 +378,14 @@ fn audiodev(vm: &Vm, ctx: &Ctx) -> String {
         .backend
         .as_deref()
         .unwrap_or(&ctx.audio_backend);
-    format!("{},id=snd0", opt(backend))
+    let mut dev = format!("{},id=snd0", opt(backend));
+    // `out.latency` is the PipeWire backend's own option; another backend refuses it.
+    if backend == "pipewire"
+        && let Some(latency) = vm.config.audio.pipewire_output_latency_us
+    {
+        dev.push_str(&format!(",out.latency={latency}"));
+    }
+    dev
 }
 
 fn common(vm: &Vm, ctx: &Ctx, a: &mut Vec<String>) -> Result<()> {
@@ -828,6 +835,7 @@ mod tests {
     fn q35_without_audio_has_no_sound_devices() {
         let mut vm = q35_vm();
         vm.config.audio.enabled = false;
+        vm.config.audio.pipewire_output_latency_us = std::num::NonZeroU32::new(100_000);
         let inv = invocation(&vm, &ctx(linux())).unwrap();
         for x in ["-audiodev", "usb-audio", "ich9-intel-hda", "hda-output"] {
             assert!(
@@ -837,6 +845,25 @@ mod tests {
             );
         }
         assert!(!inv.args.iter().any(|a| a.contains("virtio-sound")));
+    }
+
+    /// A saved PipeWire output latency reaches QEMU's audiodev where the backend is PipeWire,
+    /// the host's choice or the VM's own, and no other backend's.
+    #[test]
+    fn saved_latency_reaches_only_the_selected_pipewire_backend() {
+        let mut vm = q35_vm();
+        vm.config.audio.pipewire_output_latency_us = std::num::NonZeroU32::new(100_000);
+        let saved = toml::to_string_pretty(&vm.config).unwrap();
+        vm.config = toml::from_str(&saved).unwrap();
+        let audiodev = |vm: &Vm| {
+            let inv = invocation(vm, &ctx(linux())).unwrap();
+            let pair = inv.args.windows(2).find(|a| a[0] == "-audiodev");
+            pair.expect("(invocation): expected an -audiodev argument | received: none")[1].clone()
+        };
+        assert_eq!(audiodev(&vm), "pipewire,id=snd0,out.latency=100000");
+
+        vm.config.audio.backend = Some("pa".into());
+        assert_eq!(audiodev(&vm), "pa,id=snd0");
     }
 
     /// A disk moved to NVMe is on a controller of its own, off the AHCI controller.

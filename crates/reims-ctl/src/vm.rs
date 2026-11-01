@@ -10,6 +10,7 @@ use crate::paths;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_FILE: &str = "vm.toml";
@@ -297,6 +298,9 @@ pub struct Audio {
     /// by default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
+    /// Desired PipeWire output queue latency, in microseconds. Other backends keep theirs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipewire_output_latency_us: Option<NonZeroU32>,
 }
 
 impl Default for Audio {
@@ -304,6 +308,7 @@ impl Default for Audio {
         Audio {
             enabled: true,
             backend: None,
+            pipewire_output_latency_us: None,
         }
     }
 }
@@ -1152,6 +1157,25 @@ mod tests {
         for gone in ["apple-gfx", "vga"] {
             assert!(Graphics::parse(gone).is_err(), "{gone}");
         }
+    }
+
+    #[test]
+    fn saved_pipewire_latency_is_optional_and_positive() {
+        let mut c = x86_64_config();
+        assert!(
+            !toml::to_string_pretty(&c)
+                .unwrap()
+                .contains("pipewire_output_latency_us")
+        );
+        c.audio.pipewire_output_latency_us = NonZeroU32::new(100_000);
+        let saved = toml::to_string_pretty(&c).unwrap();
+        assert_eq!(toml::from_str::<VmConfig>(&saved).unwrap(), c);
+        let zero = saved.replace(
+            "pipewire_output_latency_us = 100000",
+            "pipewire_output_latency_us = 0",
+        );
+        assert_ne!(saved, zero);
+        assert!(toml::from_str::<VmConfig>(&zero).is_err());
     }
 
     /// A VM whose settings name no controller has its disk on SATA, and one on SATA saves
