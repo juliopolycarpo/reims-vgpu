@@ -225,6 +225,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// What the replaced-binary test runs as the running binary: this test binary, idling here.
+    #[test]
+    fn idle_as_a_replaced_binary() {
+        if std::env::var_os("REIMS_CTL_TEST_IDLE").is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    }
+
     /// What /proc/self/exe names for a running binary replaced as an update replaces it: the
     /// path with " (deleted)", which [`restart_path`] maps back to the path, now the new binary.
     #[cfg(target_os = "linux")]
@@ -233,9 +241,30 @@ mod tests {
         let d = std::env::temp_dir().join(format!("reims-ctl-replaced-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
+        // This test binary, idling, and not /bin/sleep: where coreutils is one binary under
+        // many names (uutils, BusyBox), a copy named "sleeper" is no program of it and exits.
+        let idler = std::env::current_exe().unwrap();
         let bin = d.join("sleeper");
-        std::fs::copy("/bin/sleep", &bin).unwrap();
-        let mut child = Command::new(&bin).arg("30").spawn().unwrap();
+        std::fs::copy(&idler, &bin).unwrap();
+        let spawn = || {
+            Command::new(&bin)
+                .args(["--exact", "update::tests::idle_as_a_replaced_binary"])
+                .env("REIMS_CTL_TEST_IDLE", "1")
+                .stdout(std::process::Stdio::null())
+                .spawn()
+        };
+        // The copy is busy for as long as a process another test forked before its copy closed
+        // holds it open, until that process execs: Linux refuses to exec it then (ETXTBSY).
+        let mut tries = 0;
+        let mut child = loop {
+            match spawn() {
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 200 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                r => break r.unwrap(),
+            }
+        };
         // spawn returns once the child's exec lets go of this process's memory, which the kernel
         // does a moment before it names the new binary as the child's exe: wait for that name.
         let exe = format!("/proc/{}/exe", child.id());
@@ -249,7 +278,7 @@ mod tests {
         }
         // cargo install --force: the new binary written beside, then renamed over the old.
         let new = d.join("sleeper.new");
-        std::fs::copy("/bin/sleep", &new).unwrap();
+        std::fs::copy(&idler, &new).unwrap();
         std::fs::rename(&new, &bin).unwrap();
         let named = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
         let _ = child.kill();
