@@ -367,7 +367,12 @@ fi
 # from, where its command line, and ps, show only qemu/current, through which
 # reims-ctl runs QEMU, and which a new build moves.
 qemu_executables() {
-  readlink /proc/[0-9]*/exe 2>/dev/null || true
+  local proc_exe
+  # One readlink per process: uutils' readlink prints nothing for the whole
+  # batch once one link is unreadable, as another user's process's is.
+  for proc_exe in /proc/[0-9]*/exe; do
+    readlink "$proc_exe" 2>/dev/null || true
+  done
 }
 
 # prune_qemu DIR: removes the QEMU builds in DIR but the three newest and those
